@@ -49,6 +49,7 @@ import { rotateSecretHandler } from './operations/rotatesecret';
 import { structureDefinitionExpandProfileHandler } from './operations/structuredefinitionexpandprofile';
 import { codeSystemSubsumesOperation } from './operations/subsumes';
 import { valueSetValidateOperation } from './operations/valuesetvalidatecode';
+import { viewDefinitionRunHandler } from './operations/viewdefinitionrun';
 import { sendOutcome } from './outcomes';
 import { ResendSubscriptionsOptions } from './repo';
 import { sendFhirResponse } from './response';
@@ -232,6 +233,9 @@ function initInternalFhirRouter(): FhirRouter {
   router.add('POST', '/ValueSet/$validate-code', valueSetValidateOperation);
   router.add('GET', '/ValueSet/:id/$validate-code', valueSetValidateOperation);
   router.add('POST', '/ValueSet/:id/$validate-code', valueSetValidateOperation);
+
+  // ViewDefinition $run operation (POST only - ViewDefinition passed in body)
+  router.add('POST', '/ViewDefinition/$run', viewDefinitionRunHandler);
 
   // Agent $status operation
   router.add('GET', '/Agent/$status', agentStatusHandler);

@@ -138,6 +138,12 @@ const supportedOperations: Record<string, CapabilityStatementRestResourceOperati
       definition: 'http://hl7.org/fhir/uv/bulkdata/OperationDefinition/group-export',
     },
   ],
+  ViewDefinition: [
+    {
+      name: 'run',
+      definition: 'http://hl7.org/fhir/uv/sql-on-fhir/OperationDefinition/ViewDefinition-run',
+    },
+  ],
 };
 
 /**

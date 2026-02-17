@@ -31,6 +31,7 @@ POST [base]/Patient/[id]/$summary
 | `_since` | 0..1 | `instant` | Only include resources modified since this date |
 | `identifier` | 0..1 | `string` | Identifier for the composition |
 | `profile` | 0..1 | `canonical` | Profile to validate against |
+| `_section` | 0..* | `code` | LOINC section codes or aliases to include. Repeating. When absent, all sections are returned. |
 
 ## Output
 
@@ -62,7 +63,7 @@ The summary includes the following sections (when data is available):
 | Goals | 61146-7 | Goal |
 | Health Concerns | 75310-3 | Condition (health-concern category) |
 | Functional Status | 47420-5 | Observation (survey category) |
-| Notes | 34109-9 | ClinicalImpression (note type) |
+| Notes | 11488-4 | ClinicalImpression (note type) |
 | Reason for Referral | 42349-1 | ServiceRequest (referral type) |
 | Insurance | 48768-6 | Account |
 
@@ -175,10 +176,60 @@ The operation collects and organizes the following resource types:
 4. **HTML Generation**: Generates human-readable HTML tables for each section
 5. **Event Period**: Calculates the composition event period from resource timestamps
 
+## Section Filtering
+
+Use the `_section` parameter to restrict which IPS sections appear in the summary. This is useful when patients want to share only specific categories of health data.
+
+Values can be LOINC section codes or short aliases:
+
+| Alias | LOINC Code | Section |
+|-------|------------|---------|
+| `allergies` | 48765-2 | Allergies |
+| `medications` | 10160-0 | Medications |
+| `problems` | 11450-4 | Problem List |
+| `immunizations` | 11369-6 | Immunizations |
+| `procedures` | 47519-4 | Procedures |
+| `results` | 30954-2 | Results |
+| `vitalsigns` | 8716-3 | Vital Signs |
+| `socialhistory` | 29762-2 | Social History |
+| `encounters` | 46240-8 | Encounters |
+| `devices` | 46264-8 | Devices |
+| `assessments` | 51848-0 | Assessments |
+| `planofcare` | 18776-5 | Plan of Treatment |
+| `goals` | 61146-7 | Goals |
+| `healthconcerns` | 75310-3 | Health Concerns |
+| `functionalstatus` | 47420-5 | Functional Status |
+| `notes` | 11488-4 | Notes |
+| `reasonforreferral` | 42349-1 | Reason for Referral |
+| `insurance` | 48768-6 | Insurance |
+
+### Examples
+
+Using aliases:
+
+```http
+GET /fhir/R4/Patient/patient123/$summary?_section=allergies&_section=medications
+```
+
+Using LOINC codes:
+
+```http
+GET /fhir/R4/Patient/patient123/$summary?_section=48765-2&_section=10160-0
+```
+
+Mixed with date filters:
+
+```http
+GET /fhir/R4/Patient/patient123/$summary?_section=allergies&_section=problems&start=2024-01-01
+```
+
+When `_section` is provided, the bundle is pruned to only include resources referenced by the kept sections, their nested children, and supporting participants (Practitioners, RelatedPersons).
+
 ## Error Responses
 
 | Status Code | Description |
 |-------------|-------------|
+| `400 Bad Request` | Invalid `_section` value |
 | `404 Not Found` | Patient not found |
 | `403 Forbidden` | Insufficient permissions |
 

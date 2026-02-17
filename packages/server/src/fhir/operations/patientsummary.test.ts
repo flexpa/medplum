@@ -21,6 +21,7 @@ import {
 import type { WithId } from '@medplum/core';
 import { ContentType, createReference, getReferenceString, LOINC } from '@medplum/core';
 import type {
+  AllergyIntolerance,
   Bundle,
   CarePlan,
   ClinicalImpression,
@@ -28,6 +29,8 @@ import type {
   Condition,
   DiagnosticReport,
   Encounter,
+  Immunization,
+  MedicationRequest,
   Observation,
   Organization,
   Patient,
@@ -40,7 +43,7 @@ import request from 'supertest';
 import { initApp, shutdownApp } from '../../app';
 import { loadTestConfig } from '../../config/loader';
 import { initTestAuth } from '../../test.setup';
-import { OBSERVATION_CATEGORY_SYSTEM, PatientSummaryBuilder } from './patientsummary';
+import { OBSERVATION_CATEGORY_SYSTEM, PatientSummaryBuilder, SECTION_ALIAS_MAP, resolveSectionCode } from './patientsummary';
 
 const app = express();
 let accessToken: string;
@@ -482,6 +485,313 @@ describe('Patient Summary Operation', () => {
       expect(section?.entry?.length).toBe(1);
       expect(section?.entry?.[0]?.reference).toBe(getReferenceString(parent));
     });
+
+    test('Section filter - single section by LOINC code', () => {
+      const author: Practitioner = { resourceType: 'Practitioner', id: 'author1' };
+      const patient: Patient = { resourceType: 'Patient', id: 'patient1' };
+      const patientRef = createReference(patient);
+
+      const everything: WithId<Resource>[] = [
+        { resourceType: 'AllergyIntolerance', id: 'allergy1', patient: patientRef } as WithId<AllergyIntolerance>,
+        { resourceType: 'Condition', id: 'condition1', subject: patientRef } as WithId<Condition>,
+        {
+          resourceType: 'Immunization',
+          id: 'imm1',
+          patient: patientRef,
+          status: 'completed',
+          vaccineCode: { text: 'test' },
+        } as WithId<Immunization>,
+      ];
+
+      const sectionFilter = new Set([LOINC_ALLERGIES_SECTION]);
+      const builder = new PatientSummaryBuilder(author, patient, everything, {}, sectionFilter);
+      const result = builder.build();
+
+      const composition = result.entry?.[0]?.resource as WithId<Composition>;
+      expect(composition.section?.length).toBe(1);
+      expect(composition.section?.[0]?.code?.coding?.[0]?.code).toBe(LOINC_ALLERGIES_SECTION);
+
+      // Bundle should only contain composition + patient + author + allergy (not condition or immunization)
+      const resourceTypes = result.entry?.map((e) => e.resource?.resourceType);
+      expect(resourceTypes).toContain('AllergyIntolerance');
+      expect(resourceTypes).not.toContain('Condition');
+      expect(resourceTypes).not.toContain('Immunization');
+    });
+
+    test('Section filter - multiple sections', () => {
+      const author: Practitioner = { resourceType: 'Practitioner', id: 'author1' };
+      const patient: Patient = { resourceType: 'Patient', id: 'patient1' };
+      const patientRef = createReference(patient);
+
+      const everything: WithId<Resource>[] = [
+        { resourceType: 'AllergyIntolerance', id: 'allergy1', patient: patientRef } as WithId<AllergyIntolerance>,
+        { resourceType: 'Condition', id: 'condition1', subject: patientRef } as WithId<Condition>,
+        {
+          resourceType: 'MedicationRequest',
+          id: 'med1',
+          subject: patientRef,
+          status: 'active',
+          intent: 'plan',
+        } as WithId<MedicationRequest>,
+        {
+          resourceType: 'Immunization',
+          id: 'imm1',
+          patient: patientRef,
+          status: 'completed',
+          vaccineCode: { text: 'test' },
+        } as WithId<Immunization>,
+      ];
+
+      const sectionFilter = new Set([LOINC_ALLERGIES_SECTION, LOINC_MEDICATIONS_SECTION]);
+      const builder = new PatientSummaryBuilder(author, patient, everything, {}, sectionFilter);
+      const result = builder.build();
+
+      const composition = result.entry?.[0]?.resource as WithId<Composition>;
+      expect(composition.section?.length).toBe(2);
+      const sectionCodes = composition.section?.map((s) => s.code?.coding?.[0]?.code);
+      expect(sectionCodes).toContain(LOINC_ALLERGIES_SECTION);
+      expect(sectionCodes).toContain(LOINC_MEDICATIONS_SECTION);
+
+      const resourceTypes = result.entry?.map((e) => e.resource?.resourceType);
+      expect(resourceTypes).toContain('AllergyIntolerance');
+      expect(resourceTypes).toContain('MedicationRequest');
+      expect(resourceTypes).not.toContain('Condition');
+      expect(resourceTypes).not.toContain('Immunization');
+    });
+
+    test('Section filter - nested resources included with parent', () => {
+      const author: Practitioner = { resourceType: 'Practitioner', id: 'author1' };
+      const patient: Patient = { resourceType: 'Patient', id: 'patient1' };
+      const subject = createReference(patient);
+
+      const childObs: WithId<Observation> = {
+        resourceType: 'Observation',
+        id: 'child',
+        subject,
+        status: 'final',
+        code: { text: 'test' },
+      };
+
+      const parentReport: WithId<DiagnosticReport> = {
+        resourceType: 'DiagnosticReport',
+        id: 'parent',
+        subject,
+        status: 'final',
+        code: { text: 'test' },
+        result: [createReference(childObs)],
+      };
+
+      const everything: WithId<Resource>[] = [
+        parentReport,
+        childObs,
+        { resourceType: 'Condition', id: 'condition1', subject } as WithId<Condition>,
+      ];
+
+      const sectionFilter = new Set([LOINC_RESULTS_SECTION]);
+      const builder = new PatientSummaryBuilder(author, patient, everything, {}, sectionFilter);
+      const result = builder.build();
+
+      const ids = result.entry?.map((e) => (e.resource as WithId<Resource>)?.id);
+      expect(ids).toContain('parent');
+      expect(ids).toContain('child');
+      expect(ids).not.toContain('condition1');
+    });
+
+    test('Section filter - participants always included', () => {
+      const author: Practitioner = { resourceType: 'Practitioner', id: 'author1' };
+      const patient: Patient = { resourceType: 'Patient', id: 'patient1' };
+      const patientRef = createReference(patient);
+
+      const practitioner: WithId<Practitioner> = { resourceType: 'Practitioner', id: 'pract1' };
+
+      const everything: WithId<Resource>[] = [
+        { resourceType: 'AllergyIntolerance', id: 'allergy1', patient: patientRef } as WithId<AllergyIntolerance>,
+        { resourceType: 'Condition', id: 'condition1', subject: patientRef } as WithId<Condition>,
+        practitioner,
+      ];
+
+      const sectionFilter = new Set([LOINC_ALLERGIES_SECTION]);
+      const builder = new PatientSummaryBuilder(author, patient, everything, {}, sectionFilter);
+      const result = builder.build();
+
+      const ids = result.entry?.map((e) => (e.resource as WithId<Resource>)?.id);
+      expect(ids).toContain('pract1');
+      expect(ids).toContain('allergy1');
+      expect(ids).not.toContain('condition1');
+    });
+
+    test('No section filter - all sections present (backward compat)', () => {
+      const author: Practitioner = { resourceType: 'Practitioner', id: 'author1' };
+      const patient: Patient = { resourceType: 'Patient', id: 'patient1' };
+      const patientRef = createReference(patient);
+
+      const everything: WithId<Resource>[] = [
+        { resourceType: 'AllergyIntolerance', id: 'allergy1', patient: patientRef } as WithId<AllergyIntolerance>,
+        { resourceType: 'Condition', id: 'condition1', subject: patientRef } as WithId<Condition>,
+        {
+          resourceType: 'Immunization',
+          id: 'imm1',
+          patient: patientRef,
+          status: 'completed',
+          vaccineCode: { text: 'test' },
+        } as WithId<Immunization>,
+      ];
+
+      const builder = new PatientSummaryBuilder(author, patient, everything);
+      const result = builder.build();
+
+      const composition = result.entry?.[0]?.resource as WithId<Composition>;
+      // All non-empty sections should be present
+      const sectionCodes = composition.section?.map((s) => s.code?.coding?.[0]?.code);
+      expect(sectionCodes).toContain(LOINC_ALLERGIES_SECTION);
+      expect(sectionCodes).toContain(LOINC_PROBLEMS_SECTION);
+      expect(sectionCodes).toContain(LOINC_IMMUNIZATIONS_SECTION);
+
+      // All resources should be in the bundle
+      expect(result.entry?.length).toBe(3 + everything.length);
+    });
+  });
+
+  describe('resolveSectionCode', () => {
+    test('Resolves LOINC codes directly', () => {
+      expect(resolveSectionCode(LOINC_ALLERGIES_SECTION)).toBe(LOINC_ALLERGIES_SECTION);
+      expect(resolveSectionCode(LOINC_MEDICATIONS_SECTION)).toBe(LOINC_MEDICATIONS_SECTION);
+    });
+
+    test('Resolves aliases case-insensitively', () => {
+      expect(resolveSectionCode('allergies')).toBe(LOINC_ALLERGIES_SECTION);
+      expect(resolveSectionCode('Allergies')).toBe(LOINC_ALLERGIES_SECTION);
+      expect(resolveSectionCode('ALLERGIES')).toBe(LOINC_ALLERGIES_SECTION);
+      expect(resolveSectionCode('vitalsigns')).toBe(LOINC_VITAL_SIGNS_SECTION);
+      expect(resolveSectionCode('socialhistory')).toBe(LOINC_SOCIAL_HISTORY_SECTION);
+    });
+
+    test('Returns undefined for invalid values', () => {
+      expect(resolveSectionCode('bogus')).toBeUndefined();
+      expect(resolveSectionCode('99999-9')).toBeUndefined();
+    });
+
+    test('All aliases map to valid section codes', () => {
+      for (const [alias, code] of Object.entries(SECTION_ALIAS_MAP)) {
+        expect(resolveSectionCode(alias)).toBe(code);
+      }
+    });
+  });
+
+  test('GET with _section query param', async () => {
+    // Create patient
+    const res1 = await request(app)
+      .post(`/fhir/R4/Patient`)
+      .set('Authorization', 'Bearer ' + accessToken)
+      .set('Content-Type', ContentType.FHIR_JSON)
+      .send({
+        resourceType: 'Patient',
+        name: [{ given: ['Bob'], family: 'Jones' }],
+      } satisfies Patient);
+    expect(res1.status).toBe(201);
+    const patient = res1.body as WithId<Patient>;
+
+    // Create allergy
+    const res2 = await request(app)
+      .post(`/fhir/R4/AllergyIntolerance`)
+      .set('Authorization', 'Bearer ' + accessToken)
+      .set('Content-Type', ContentType.FHIR_JSON)
+      .send({
+        resourceType: 'AllergyIntolerance',
+        patient: createReference(patient),
+        code: { coding: [{ system: LOINC, code: '123' }] },
+      } satisfies AllergyIntolerance);
+    expect(res2.status).toBe(201);
+
+    // Create condition (should be excluded)
+    const res3 = await request(app)
+      .post(`/fhir/R4/Condition`)
+      .set('Authorization', 'Bearer ' + accessToken)
+      .set('Content-Type', ContentType.FHIR_JSON)
+      .send({
+        resourceType: 'Condition',
+        subject: createReference(patient),
+        code: { coding: [{ system: LOINC, code: '456' }] },
+      } satisfies Condition);
+    expect(res3.status).toBe(201);
+
+    const res4 = await request(app)
+      .get(`/fhir/R4/Patient/${patient.id}/$summary?_section=allergies`)
+      .set('Authorization', 'Bearer ' + accessToken);
+    expect(res4.status).toBe(200);
+
+    const bundle = res4.body as WithId<Bundle>;
+    const composition = bundle.entry?.[0]?.resource as WithId<Composition>;
+    expect(composition.section?.length).toBe(1);
+    expect(composition.section?.[0]?.code?.coding?.[0]?.code).toBe(LOINC_ALLERGIES_SECTION);
+
+    const resourceTypes = bundle.entry?.map((e) => e.resource?.resourceType);
+    expect(resourceTypes).toContain('AllergyIntolerance');
+    expect(resourceTypes).not.toContain('Condition');
+  });
+
+  test('GET with multiple _section query params', async () => {
+    const res1 = await request(app)
+      .post(`/fhir/R4/Patient`)
+      .set('Authorization', 'Bearer ' + accessToken)
+      .set('Content-Type', ContentType.FHIR_JSON)
+      .send({
+        resourceType: 'Patient',
+        name: [{ given: ['Carol'], family: 'White' }],
+      } satisfies Patient);
+    expect(res1.status).toBe(201);
+    const patient = res1.body as WithId<Patient>;
+
+    await request(app)
+      .post(`/fhir/R4/AllergyIntolerance`)
+      .set('Authorization', 'Bearer ' + accessToken)
+      .set('Content-Type', ContentType.FHIR_JSON)
+      .send({
+        resourceType: 'AllergyIntolerance',
+        patient: createReference(patient),
+        code: { coding: [{ system: LOINC, code: '123' }] },
+      } satisfies AllergyIntolerance);
+
+    await request(app)
+      .post(`/fhir/R4/MedicationRequest`)
+      .set('Authorization', 'Bearer ' + accessToken)
+      .set('Content-Type', ContentType.FHIR_JSON)
+      .send({
+        resourceType: 'MedicationRequest',
+        subject: createReference(patient),
+        status: 'active',
+        intent: 'plan',
+      } satisfies MedicationRequest);
+
+    const res4 = await request(app)
+      .get(`/fhir/R4/Patient/${patient.id}/$summary?_section=allergies&_section=medications`)
+      .set('Authorization', 'Bearer ' + accessToken);
+    expect(res4.status).toBe(200);
+
+    const bundle = res4.body as WithId<Bundle>;
+    const composition = bundle.entry?.[0]?.resource as WithId<Composition>;
+    expect(composition.section?.length).toBe(2);
+    const sectionCodes = composition.section?.map((s) => s.code?.coding?.[0]?.code);
+    expect(sectionCodes).toContain(LOINC_ALLERGIES_SECTION);
+    expect(sectionCodes).toContain(LOINC_MEDICATIONS_SECTION);
+  });
+
+  test('GET with invalid _section returns 400', async () => {
+    const res1 = await request(app)
+      .post(`/fhir/R4/Patient`)
+      .set('Authorization', 'Bearer ' + accessToken)
+      .set('Content-Type', ContentType.FHIR_JSON)
+      .send({
+        resourceType: 'Patient',
+        name: [{ given: ['Dave'], family: 'Brown' }],
+      } satisfies Patient);
+    expect(res1.status).toBe(201);
+    const patient = res1.body as WithId<Patient>;
+
+    const res2 = await request(app)
+      .get(`/fhir/R4/Patient/${patient.id}/$summary?_section=bogus`)
+      .set('Authorization', 'Bearer ' + accessToken);
+    expect(res2.status).toBe(400);
   });
 });
 

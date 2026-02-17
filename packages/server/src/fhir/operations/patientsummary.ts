@@ -26,6 +26,7 @@ import {
 import type { ProfileResource, WithId } from '@medplum/core';
 import {
   allOk,
+  badRequest,
   createReference,
   EMPTY,
   escapeHtml,
@@ -36,6 +37,7 @@ import {
   generateId,
   HTTP_TERMINOLOGY_HL7_ORG,
   LOINC,
+  OperationOutcomeError,
   resolveId,
 } from '@medplum/core';
 import type { FhirRequest, FhirResponse } from '@medplum/fhir-router';
@@ -77,6 +79,36 @@ import { parseInputParameters } from './utils/parameters';
 
 export const OBSERVATION_CATEGORY_SYSTEM = `${HTTP_TERMINOLOGY_HL7_ORG}/CodeSystem/observation-category`;
 
+export const SECTION_ALIAS_MAP: Record<string, string> = {
+  allergies: LOINC_ALLERGIES_SECTION,
+  medications: LOINC_MEDICATIONS_SECTION,
+  problems: LOINC_PROBLEMS_SECTION,
+  immunizations: LOINC_IMMUNIZATIONS_SECTION,
+  procedures: LOINC_PROCEDURES_SECTION,
+  results: LOINC_RESULTS_SECTION,
+  vitalsigns: LOINC_VITAL_SIGNS_SECTION,
+  socialhistory: LOINC_SOCIAL_HISTORY_SECTION,
+  encounters: LOINC_ENCOUNTERS_SECTION,
+  devices: LOINC_DEVICES_SECTION,
+  assessments: LOINC_ASSESSMENTS_SECTION,
+  planofcare: LOINC_PLAN_OF_TREATMENT_SECTION,
+  goals: LOINC_GOALS_SECTION,
+  healthconcerns: LOINC_HEALTH_CONCERNS_SECTION,
+  functionalstatus: LOINC_FUNCTIONAL_STATUS_SECTION,
+  notes: LOINC_NOTES_SECTION,
+  reasonforreferral: LOINC_REASON_FOR_REFERRAL_SECTION,
+  insurance: LOINC_INSURANCE_SECTION,
+};
+
+const VALID_SECTION_CODES: Set<string> = new Set(Object.values(SECTION_ALIAS_MAP));
+
+export function resolveSectionCode(value: string): string | undefined {
+  if (VALID_SECTION_CODES.has(value)) {
+    return value;
+  }
+  return SECTION_ALIAS_MAP[value.toLowerCase()];
+}
+
 // International Patient Summary Implementation Guide
 // https://build.fhir.org/ig/HL7/fhir-ips/index.html
 
@@ -104,6 +136,7 @@ export const operation = {
     ['_since', 'in', 0, 1, 'instant'],
     ['identifier', 'in', 0, 1, 'string'],
     ['profile', 'in', 0, 1, 'canonical'],
+    ['_section', 'in', 0, '*', 'code'],
     ['return', 'out', 0, 1, 'Bundle'],
   ].map(([name, use, min, max, type]) => ({ name, use, min, max, type }) as OperationDefinitionParameter),
 } satisfies OperationDefinition;
@@ -132,6 +165,7 @@ export type CompositionAuthorResource = Practitioner | PractitionerRole | Organi
 export interface PatientSummaryParameters extends PatientEverythingParameters {
   author?: Reference<CompositionAuthorResource>;
   authoredOn?: string;
+  _section?: string[];
 }
 
 /**
@@ -165,10 +199,23 @@ export async function getPatientSummary(
   const authorRef = (params.author ?? ctx.profile) as Reference<CompositionAuthorResource>;
   const author = await repo.readReference(authorRef);
   const patient = await repo.readReference(patientRef);
+
+  let sectionFilter: Set<string> | undefined;
+  if (params._section && params._section.length > 0) {
+    sectionFilter = new Set<string>();
+    for (const value of params._section) {
+      const code = resolveSectionCode(value);
+      if (!code) {
+        throw new OperationOutcomeError(badRequest(`Invalid _section value: '${value}'`));
+      }
+      sectionFilter.add(code);
+    }
+  }
+
   params._type = resourceTypes;
   const everythingBundle = await getPatientEverything(repo, patient, params);
   const everything = (everythingBundle.entry?.map((e) => e.resource) ?? []) as WithId<Resource>[];
-  const builder = new PatientSummaryBuilder(author, patient, everything, params);
+  const builder = new PatientSummaryBuilder(author, patient, everything, params, sectionFilter);
   return builder.build();
 }
 
@@ -205,17 +252,24 @@ export class PatientSummaryBuilder {
   private readonly reasonForReferral: ServiceRequest[] = [];
   private readonly insurance: Account[] = [];
   private readonly nestedIds = new Set<string>();
+  private readonly sectionFilter: Set<string> | undefined;
 
   constructor(
     author: CompositionAuthorResource,
     patient: Patient,
     everything: WithId<Resource>[],
-    params: PatientSummaryParameters = {}
+    params: PatientSummaryParameters = {},
+    sectionFilter?: Set<string>
   ) {
     this.author = author;
     this.patient = patient;
     this.everything = everything;
     this.params = params;
+    this.sectionFilter = sectionFilter;
+  }
+
+  private isSectionIncluded(loincCode: string): boolean {
+    return !this.sectionFilter || this.sectionFilter.has(loincCode);
   }
 
   build(): Bundle {
@@ -439,26 +493,31 @@ export class PatientSummaryBuilder {
       confidentiality: 'N',
       custodian: this.patient.managingOrganization,
       event: this.buildEvent(),
-      section: [
-        this.createAllergiesSection(),
-        this.createImmunizationsSection(),
-        this.createMedicationsSection(),
-        this.createProblemListSection(),
-        this.createResultsSection(),
-        this.createSocialHistorySection(),
-        this.createVitalSignsSection(),
-        this.createProceduresSection(),
-        this.createEncountersSection(),
-        this.createDevicesSection(),
-        this.createAssessmentsSection(),
-        this.createPlanOfTreatmentSection(),
-        this.createGoalsSection(),
-        this.createHealthConcernsSection(),
-        this.createFunctionalStatusSection(),
-        this.createNotesSection(),
-        this.createReasonForReferralSection(),
-        this.createInsuranceSection(),
-      ].filter(Boolean) as CompositionSection[],
+      section: (
+        [
+          [LOINC_ALLERGIES_SECTION, () => this.createAllergiesSection()],
+          [LOINC_IMMUNIZATIONS_SECTION, () => this.createImmunizationsSection()],
+          [LOINC_MEDICATIONS_SECTION, () => this.createMedicationsSection()],
+          [LOINC_PROBLEMS_SECTION, () => this.createProblemListSection()],
+          [LOINC_RESULTS_SECTION, () => this.createResultsSection()],
+          [LOINC_SOCIAL_HISTORY_SECTION, () => this.createSocialHistorySection()],
+          [LOINC_VITAL_SIGNS_SECTION, () => this.createVitalSignsSection()],
+          [LOINC_PROCEDURES_SECTION, () => this.createProceduresSection()],
+          [LOINC_ENCOUNTERS_SECTION, () => this.createEncountersSection()],
+          [LOINC_DEVICES_SECTION, () => this.createDevicesSection()],
+          [LOINC_ASSESSMENTS_SECTION, () => this.createAssessmentsSection()],
+          [LOINC_PLAN_OF_TREATMENT_SECTION, () => this.createPlanOfTreatmentSection()],
+          [LOINC_GOALS_SECTION, () => this.createGoalsSection()],
+          [LOINC_HEALTH_CONCERNS_SECTION, () => this.createHealthConcernsSection()],
+          [LOINC_FUNCTIONAL_STATUS_SECTION, () => this.createFunctionalStatusSection()],
+          [LOINC_NOTES_SECTION, () => this.createNotesSection()],
+          [LOINC_REASON_FOR_REFERRAL_SECTION, () => this.createReasonForReferralSection()],
+          [LOINC_INSURANCE_SECTION, () => this.createInsuranceSection()],
+        ] as [string, () => CompositionSection | undefined][]
+      )
+        .filter(([code]) => this.isSectionIncluded(code))
+        .map(([, build]) => build())
+        .filter(Boolean) as CompositionSection[],
     };
     return composition;
   }
@@ -814,7 +873,44 @@ export class PatientSummaryBuilder {
   }
 
   private buildBundle(composition: Composition): Bundle {
-    const allResources = [composition, this.patient, this.author, ...this.everything];
+    let resources: Resource[];
+    if (this.sectionFilter) {
+      // Collect IDs referenced by kept sections
+      const keptIds = new Set<string>();
+      for (const section of composition.section ?? []) {
+        for (const entry of section.entry ?? []) {
+          if (entry.reference) {
+            const id = resolveId(entry);
+            if (id) {
+              keptIds.add(id);
+            }
+          }
+        }
+      }
+      // Include nested children of kept resources
+      for (const id of this.nestedIds) {
+        const resource = this.everything.find((r) => r.id === id);
+        if (!resource) {
+          continue;
+        }
+        // Check if the parent of this nested resource is in the kept set
+        for (const kept of this.everything) {
+          if (!keptIds.has(kept.id)) {
+            continue;
+          }
+          if (this.isNestedChild(kept, id)) {
+            keptIds.add(id);
+          }
+        }
+      }
+      // Always include participants (Practitioners, RelatedPersons)
+      for (const p of this.participants) {
+        keptIds.add(p.id as string);
+      }
+      resources = [composition, this.patient, this.author, ...this.everything.filter((r) => keptIds.has(r.id))];
+    } else {
+      resources = [composition, this.patient, this.author, ...this.everything];
+    }
 
     // See International Patient Summary Implementation Guide
     // Bundle - Minimal Complete IPS - JSON Representation
@@ -823,10 +919,61 @@ export class PatientSummaryBuilder {
       resourceType: 'Bundle',
       type: 'document',
       timestamp: new Date().toISOString(),
-      entry: allResources.map((resource) => ({ resource })),
+      entry: resources.map((resource) => ({ resource })),
     };
 
     return bundle;
+  }
+
+  /**
+   * Checks if a resource has the given ID as a nested child reference.
+   */
+  private isNestedChild(resource: WithId<Resource>, childId: string): boolean {
+    if (resource.resourceType === 'Observation' && (resource as Observation).hasMember) {
+      for (const member of (resource as Observation).hasMember ?? []) {
+        if (resolveId(member) === childId) {
+          return true;
+        }
+      }
+    }
+    if (resource.resourceType === 'DiagnosticReport' && (resource as DiagnosticReport).result) {
+      for (const result of (resource as DiagnosticReport).result ?? []) {
+        if (resolveId(result) === childId) {
+          return true;
+        }
+      }
+    }
+    if (resource.resourceType === 'CarePlan' && (resource as CarePlan).activity) {
+      for (const activity of (resource as CarePlan).activity ?? []) {
+        if (activity.reference && resolveId(activity.reference) === childId) {
+          return true;
+        }
+      }
+    }
+    if (resource.resourceType === 'Encounter' && (resource as Encounter).diagnosis) {
+      for (const diagnosis of (resource as Encounter).diagnosis ?? []) {
+        if (diagnosis.condition && resolveId(diagnosis.condition) === childId) {
+          return true;
+        }
+      }
+    }
+    if (resource.resourceType === 'Condition' && (resource as Condition).evidence) {
+      for (const evidence of (resource as Condition).evidence ?? []) {
+        for (const detail of evidence.detail ?? []) {
+          if (resolveId(detail) === childId) {
+            return true;
+          }
+        }
+      }
+    }
+    if (resource.resourceType === 'Account' && (resource as Account).coverage) {
+      for (const coverage of (resource as Account).coverage ?? []) {
+        if (coverage.coverage && resolveId(coverage.coverage) === childId) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   private getByReference<T extends Resource>(ref: Reference<T> | undefined): T | undefined {

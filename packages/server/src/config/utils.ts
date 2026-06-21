@@ -148,6 +148,8 @@ const integerKeys = new Set([
   'pubSubRedis.port',
   'backgroundJobsRedis.db',
   'backgroundJobsRedis.port',
+  'authRedis.db',
+  'authRedis.port',
 
   'smtp.port',
 

@@ -53,6 +53,16 @@ export interface MedplumServerConfig {
    * Separating background job queues from other purposes can improve performance under high load by isolating job queue operations.
    */
   backgroundJobsRedis?: MedplumRedisConfig;
+  /**
+   * Optional separate Redis config for authentication `Login` resources (the cache-only `client`
+   * and `execute` Logins read by `getLoginForAccessToken`).
+   * Falls back to `cacheRedis`, then `redis`, if not specified.
+   * Isolating auth Logins onto a dedicated instance lets it be sized and configured with
+   * `noeviction` so the high-churn resource cache can never evict a still-valid Login and cause a
+   * spurious 401 on a correctly-signed, unexpired token. Must be cluster-mode-disabled (Medplum
+   * uses a standalone client and cross-slot operations).
+   */
+  authRedis?: MedplumRedisConfig;
   emailProvider?: 'none' | 'awsses' | 'smtp';
   smtp?: MedplumSmtpConfig;
   /** Allow projects to configure their own SMTP transport via Project.secret entries. Default is `true`. */

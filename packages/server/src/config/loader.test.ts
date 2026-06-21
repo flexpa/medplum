@@ -220,6 +220,21 @@ describe('Config', () => {
     expect(config.backgroundJobsRedis?.db).toStrictEqual(3);
   });
 
+  test('Env config authRedis prefix', async () => {
+    setEnv('MEDPLUM_BASE_URL', 'http://localhost:3000');
+    setEnv('MEDPLUM_AUTH_REDIS_HOST', 'auth-redis.example.com');
+    setEnv('MEDPLUM_AUTH_REDIS_PORT', '6384');
+    setEnv('MEDPLUM_AUTH_REDIS_DB', '4');
+    setEnv('MEDPLUM_AUTH_REDIS_PASSWORD', 'auth-secret');
+
+    const config = await loadConfig('env');
+    expect(config.authRedis).toBeDefined();
+    expect(config.authRedis?.host).toStrictEqual('auth-redis.example.com');
+    expect(config.authRedis?.port).toStrictEqual(6384);
+    expect(config.authRedis?.db).toStrictEqual(4);
+    expect(config.authRedis?.password).toStrictEqual('auth-secret');
+  });
+
   test('Env config bullmq prefix', async () => {
     setEnv('MEDPLUM_BASE_URL', 'http://localhost:3000');
     setEnv('MEDPLUM_BULLMQ_CONCURRENCY', '10');

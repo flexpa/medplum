@@ -7,6 +7,7 @@ import type { MedplumServerConfig } from './config/types';
 import {
   closeRedis,
   getAllRedisInstances,
+  getAuthRedis,
   getCacheRedis,
   getPubSubRedis,
   getPubSubRedisSubscriber,
@@ -44,6 +45,7 @@ describe('Redis', () => {
     expect(() => getCacheRedis()).toThrow('Redis is closing');
     expect(() => getRateLimitRedis()).toThrow('Redis is closing');
     expect(() => getPubSubRedis()).toThrow('Redis is closing');
+    expect(() => getAuthRedis()).toThrow('Redis is closing, cannot get auth Redis');
     expect(() => getPubSubRedisSubscriber()).toThrow('Redis is closing');
     await closePromise;
   });
@@ -70,20 +72,24 @@ describe('Redis', () => {
         rateLimitRedis: { ...config.redis },
         pubSubRedis: { ...config.redis },
         backgroundJobsRedis: { ...config.redis },
+        authRedis: { ...config.redis },
       };
       initRedis(separateConfig);
 
       const cache = getCacheRedis();
       const rateLimit = getRateLimitRedis();
       const pubSub = getPubSubRedis();
+      const auth = getAuthRedis();
 
       expect(cache).toBeDefined();
       expect(rateLimit).toBeDefined();
       expect(pubSub).toBeDefined();
+      expect(auth).toBeDefined();
 
       // When separate instances are configured, they should be different from each other
       expect(cache).not.toBe(rateLimit);
       expect(cache).not.toBe(pubSub);
+      expect(auth).not.toBe(cache);
 
       await closeRedis();
     });
@@ -95,6 +101,7 @@ describe('Redis', () => {
         rateLimitRedis: undefined,
         pubSubRedis: undefined,
         backgroundJobsRedis: undefined,
+        authRedis: undefined,
       };
       initRedis(defaultOnlyConfig);
 
@@ -102,9 +109,42 @@ describe('Redis', () => {
       const cache = getCacheRedis();
       const rateLimit = getRateLimitRedis();
       const pubSub = getPubSubRedis();
+      const auth = getAuthRedis();
 
       expect(cache).toBe(rateLimit);
       expect(cache).toBe(pubSub);
+      expect(auth).toBe(cache);
+
+      await closeRedis();
+    });
+
+    test('getAuthRedis falls back to cache instance when authRedis unset but cacheRedis set', async () => {
+      const cacheOnlyConfig: MedplumServerConfig = {
+        ...config,
+        cacheRedis: { ...config.redis },
+        authRedis: undefined,
+      };
+      initRedis(cacheOnlyConfig);
+
+      const cache = getCacheRedis();
+      const auth = getAuthRedis();
+      expect(auth).toBe(cache);
+
+      await closeRedis();
+    });
+
+    test('getAuthRedis uses the dedicated instance when configured', async () => {
+      const separateConfig: MedplumServerConfig = {
+        ...config,
+        cacheRedis: { ...config.redis },
+        authRedis: { ...config.redis },
+      };
+      initRedis(separateConfig);
+
+      const auth = getAuthRedis();
+      const cache = getCacheRedis();
+      expect(auth).toBeInstanceOf(Redis);
+      expect(auth).not.toBe(cache);
 
       await closeRedis();
     });
@@ -132,6 +172,7 @@ describe('Redis', () => {
         rateLimitRedis: undefined,
         pubSubRedis: undefined,
         backgroundJobsRedis: undefined,
+        authRedis: undefined,
       };
       initRedis(defaultOnlyConfig);
 
@@ -149,17 +190,19 @@ describe('Redis', () => {
         rateLimitRedis: { ...config.redis },
         pubSubRedis: { ...config.redis },
         backgroundJobsRedis: { ...config.redis },
+        authRedis: { ...config.redis },
       };
       initRedis(separateConfig);
 
       const instances = getAllRedisInstances();
-      expect(instances).toHaveLength(5);
+      expect(instances).toHaveLength(6);
       const labels = instances.map((i) => i.label);
       expect(labels).toContain('default');
       expect(labels).toContain('cache');
       expect(labels).toContain('rateLimit');
       expect(labels).toContain('pubSub');
       expect(labels).toContain('backgroundJobs');
+      expect(labels).toContain('auth');
 
       await closeRedis();
     });

@@ -56,6 +56,8 @@ export async function loadAwsConfig(path: string): Promise<MedplumServerConfig> 
       config['pubSubRedis'] = await loadAwsSecrets(region, value);
     } else if (key === 'BackgroundJobsRedisSecrets') {
       config['backgroundJobsRedis'] = await loadAwsSecrets(region, value);
+    } else if (key === 'AuthRedisSecrets') {
+      config['authRedis'] = await loadAwsSecrets(region, value);
     }
   }
 

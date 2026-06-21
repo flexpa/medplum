@@ -19,12 +19,14 @@ const redisInstances: {
   rateLimit: RedisInstance;
   pubSub: RedisInstance & { subscribers: Set<Redis> };
   backgroundJobs: RedisInstance;
+  auth: RedisInstance;
   default: RedisInstance;
 } = {
   cache: { redis: undefined },
   rateLimit: { redis: undefined },
   pubSub: { redis: undefined, subscribers: new Set() },
   backgroundJobs: { redis: undefined },
+  auth: { redis: undefined },
   default: { redis: undefined },
 };
 
@@ -68,6 +70,12 @@ export function initRedis(config: MedplumServerConfig): void {
   if (config.backgroundJobsRedis) {
     redisInstances.backgroundJobs.redis = new Redis({
       ...config.backgroundJobsRedis,
+      reconnectOnError,
+    }) as RedisWithoutDuplicate;
+  }
+  if (config.authRedis) {
+    redisInstances.auth.redis = new Redis({
+      ...config.authRedis,
       reconnectOnError,
     }) as RedisWithoutDuplicate;
   }
@@ -123,6 +131,29 @@ function getRedisInstance(label: keyof typeof redisInstances): RedisWithoutDupli
  */
 export function getCacheRedis(): RedisWithoutDuplicate {
   return getRedisInstance('cache');
+}
+
+/**
+ * Gets the `Redis` instance designated for authentication `Login` resources.
+ * Falls back to the cache instance, then the default instance, if no separate auth Redis is
+ * configured. The cache-first fallback preserves the pre-existing behaviour (auth Logins were
+ * cached alongside other resources on the cache Redis) when `authRedis` is not provisioned.
+ *
+ * When configured, this instance should be sized for the working set of live Logins and set to
+ * `noeviction` so a still-valid Login is never evicted out from under an in-flight token. It must
+ * be cluster-mode-disabled (Medplum uses a standalone client and cross-slot operations).
+ *
+ * @returns The auth `Redis` instance.
+ */
+export function getAuthRedis(): RedisWithoutDuplicate {
+  if (closing) {
+    throw new Error('Redis is closing, cannot get auth Redis');
+  }
+  const instance = redisInstances.auth.redis ?? redisInstances.cache.redis ?? redisInstances.default.redis;
+  if (!instance) {
+    throw new Error('Redis instance for auth not initialized');
+  }
+  return instance;
 }
 
 /**

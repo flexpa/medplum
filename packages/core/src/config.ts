@@ -86,6 +86,12 @@ export interface MedplumSourceInfraConfig {
     engine?: ValueOrExternalSecret<string>;
     engineVersion?: ValueOrExternalSecret<string>;
   };
+  authRedis?: {
+    nodeType?: ValueOrExternalSecret<string>;
+    securityGroupId?: ValueOrExternalSecret<string>;
+    engine?: ValueOrExternalSecret<string>;
+    engineVersion?: ValueOrExternalSecret<string>;
+  };
   desiredServerCount: ValueOrExternalSecret<number>;
   serverImage: ValueOrExternalSecret<string>;
   serverMemory: ValueOrExternalSecret<number>;
@@ -254,6 +260,12 @@ export interface MedplumInfraConfig {
     engineVersion?: string;
   };
   backgroundJobsRedis?: {
+    nodeType?: string;
+    securityGroupId?: string;
+    engine?: string;
+    engineVersion?: string;
+  };
+  authRedis?: {
     nodeType?: string;
     securityGroupId?: string;
     engine?: string;

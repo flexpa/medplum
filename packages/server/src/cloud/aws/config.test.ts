@@ -27,6 +27,7 @@ describe('Config', () => {
         { Name: 'database.ssl.ca', Value: 'DatabaseSslCa' },
         { Name: 'DatabaseSecrets', Value: 'DatabaseSecretsArn' },
         { Name: 'RedisSecrets', Value: 'RedisSecretsArn' },
+        { Name: 'AuthRedisSecrets', Value: 'AuthRedisSecretsArn' },
         { Name: 'port', Value: '8080' },
         { Name: 'botCustomFunctionsEnabled', Value: 'true' },
         { Name: 'logAuditEvents', Value: 'true' },
@@ -61,6 +62,9 @@ describe('Config', () => {
     expect(config.database.ssl?.require).toStrictEqual(true);
     expect(config.database.ssl?.rejectUnauthorized).toStrictEqual(true);
     expect(config.database.ssl?.ca).toStrictEqual('DatabaseSslCa');
+    expect(config.authRedis).toBeDefined();
+    expect(config.authRedis?.host).toStrictEqual('host');
+    expect(config.authRedis?.port).toStrictEqual(123);
     expect(getConfig()).toBe(config);
     expect(mockSSMClient).toReceiveCommand(GetParametersByPathCommand);
   });

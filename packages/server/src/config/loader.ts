@@ -216,6 +216,10 @@ function loadEnvConfig(): MedplumServerConfig {
       key = key.substring('BACKGROUND_JOBS_REDIS_'.length);
       currConfig = config.backgroundJobsRedis ??= {};
       section = 'backgroundJobsRedis';
+    } else if (key.startsWith('AUTH_REDIS_')) {
+      key = key.substring('AUTH_REDIS_'.length);
+      currConfig = config.authRedis ??= {};
+      section = 'authRedis';
     } else if (key.startsWith('REDIS_')) {
       key = key.substring('REDIS_'.length);
       currConfig = config.redis ??= {};

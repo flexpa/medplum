@@ -42,6 +42,15 @@ export class Storage extends Construct {
         encryption: s3.BucketEncryption.S3_MANAGED,
         enforceSSL: true,
         versioned: true,
+        lifecycleRules: [
+          {
+            id: 'reclaim-expunged-binaries',
+            enabled: true,
+            noncurrentVersionExpiration: Duration.days(30),
+            expiredObjectDeleteMarker: true,
+            abortIncompleteMultipartUploadAfter: Duration.days(7),
+          },
+        ],
       });
 
       if (config.guardDutyMalwareProtectionEnabled) {

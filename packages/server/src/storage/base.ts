@@ -18,6 +18,8 @@ export abstract class BaseBinaryStorage implements BinaryStorage {
 
   abstract copyFile(sourceKey: string, destinationKey: string): Promise<void>;
 
+  abstract deleteByPrefix(prefix: string): Promise<void>;
+
   abstract getPresignedUrl(binary: Binary, opts?: PresignedUrlOptions): Promise<string>;
 
   readBinary(binary: Binary): Promise<Readable> {
@@ -36,6 +38,10 @@ export abstract class BaseBinaryStorage implements BinaryStorage {
 
   copyBinary(sourceBinary: Binary, destinationBinary: Binary): Promise<void> {
     return this.copyFile(this.getKey(sourceBinary), this.getKey(destinationBinary));
+  }
+
+  deleteBinary(binary: Binary): Promise<void> {
+    return this.deleteByPrefix('binary/' + binary.id + '/');
   }
 
   getKey(binary: Binary): string {

@@ -206,6 +206,22 @@ function toTypedValueWithType(value: any, type: string): TypedValue {
   return { type, value };
 }
 
+type PropertyTypeValue = (typeof PropertyType)[keyof typeof PropertyType];
+
+/**
+ * Choice-of-type candidate suffixes (`String`, `Quantity`, …) memoized on first use, so the
+ * schemaless property scan does not recompute `capitalize()` for every {@link PropertyType}
+ * on every absent/choice property access (a hot path during write-time search-param indexing).
+ * Lazily initialized to avoid a circular-import TDZ on `PropertyType` at module load.
+ */
+let capitalizedPropertyTypes: readonly (readonly [PropertyTypeValue, string])[] | undefined;
+function getCapitalizedPropertyTypes(): readonly (readonly [PropertyTypeValue, string])[] {
+  capitalizedPropertyTypes ??= Object.values(PropertyType).map(
+    (propertyType) => [propertyType, capitalize(propertyType)] as const
+  );
+  return capitalizedPropertyTypes;
+}
+
 /**
  * Returns the value of the property and the property type using a type schema.
  * Note that because the type schema is not available, this function may be inaccurate.
@@ -240,8 +256,8 @@ export function getTypedPropertyValueWithoutSchema(
     // id + identifier = not ok, because "entifier" is not a valid type
     // resource + resourceType = not ok, because "type" is not a valid type
     const trimmedPath = path.endsWith('[x]') ? path.substring(0, path.length - 3) : path;
-    for (const propertyType of Object.values(PropertyType)) {
-      const propertyName = trimmedPath + capitalize(propertyType);
+    for (const [propertyType, capitalized] of getCapitalizedPropertyTypes()) {
+      const propertyName = trimmedPath + capitalized;
       if (propertyName in input) {
         const propertyValue = (input as { [key: string]: unknown })[propertyName];
         if (Array.isArray(propertyValue)) {

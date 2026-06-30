@@ -240,16 +240,24 @@ export function getTypedPropertyValueWithoutSchema(
     // id + identifier = not ok, because "entifier" is not a valid type
     // resource + resourceType = not ok, because "type" is not a valid type
     const trimmedPath = path.endsWith('[x]') ? path.substring(0, path.length - 3) : path;
-    for (const propertyType of Object.values(PropertyType)) {
-      const propertyName = trimmedPath + capitalize(propertyType);
-      if (propertyName in input) {
-        const propertyValue = (input as { [key: string]: unknown })[propertyName];
-        if (Array.isArray(propertyValue)) {
-          result = propertyValue.map((v) => ({ type: propertyType, value: v }));
-        } else {
-          result = { type: propertyType, value: propertyValue };
+    // Choice-of-type element names are always lowerCamelCase (e.g. "value" -> "valueString").
+    // A PascalCase path is a resource/datatype type name, not a property -- e.g. a FHIRPath
+    // search-parameter union term ("AllergyIntolerance.patient | ... | Procedure.subject")
+    // whose leading type name does not match the resource being navigated. That can never be a
+    // choice-of-type expansion, so the scan below would always miss; skip it.
+    const firstChar = trimmedPath.charCodeAt(0);
+    if (firstChar < 65 || firstChar > 90) {
+      for (const propertyType of Object.values(PropertyType)) {
+        const propertyName = trimmedPath + capitalize(propertyType);
+        if (propertyName in input) {
+          const propertyValue = (input as { [key: string]: unknown })[propertyName];
+          if (Array.isArray(propertyValue)) {
+            result = propertyValue.map((v) => ({ type: propertyType, value: v }));
+          } else {
+            result = { type: propertyType, value: propertyValue };
+          }
+          break;
         }
-        break;
       }
     }
   }

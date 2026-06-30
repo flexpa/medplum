@@ -18,6 +18,8 @@
     "build": "npm run clean && tsc && node build.mjs",
     "circular": "npx madge --circular dist/index.js",
     "clean": "rimraf dist",
+    "benchmark": "tsx src/benchmarks/batch-insert.ts",
+    "benchmark:profile": "tsx src/benchmarks/batch-insert.ts --profile",
     "dev": "tsx watch --experimental-loader=@opentelemetry/instrumentation/hook.mjs --import ./src/otel/instrumentation.ts src/index.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

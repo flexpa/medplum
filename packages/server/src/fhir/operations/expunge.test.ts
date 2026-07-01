@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 import { ContentType, createReference, LOINC } from '@medplum/core';
-import type { Observation, Patient } from '@medplum/fhirtypes';
+import type { Binary, Observation, Patient } from '@medplum/fhirtypes';
 import { randomUUID } from 'crypto';
 import express from 'express';
 import request from 'supertest';
@@ -9,6 +9,7 @@ import { initApp, shutdownApp } from '../../app';
 import { loadTestConfig } from '../../config/loader';
 import { DatabaseMode, getDatabasePool } from '../../database';
 import { getCacheRedis } from '../../redis';
+import { getBinaryStorage } from '../../storage/loader';
 import { createTestProject, initTestAuth, waitForAsyncJob, withTestContext } from '../../test.setup';
 import { getGlobalSystemRepo } from '../repo';
 import { SelectQuery } from '../sql';
@@ -69,6 +70,29 @@ describe('Expunge', () => {
     expect(await existsInDatabase('Patient_History', patient.id)).toBe(false);
     // Also expect lookup table to be cleaned up
     expect(await existsInLookupTable('HumanName', patient.id)).toBe(false);
+  });
+
+  test('Expunging a Binary deletes its storage objects', async () => {
+    const binary = await withTestContext(() =>
+      systemRepo.createResource<Binary>({ resourceType: 'Binary', contentType: ContentType.TEXT })
+    );
+    expect(await existsInDatabase('Binary', binary.id)).toBe(true);
+
+    const deleteBinarySpy = jest.spyOn(getBinaryStorage(), 'deleteBinary').mockResolvedValue();
+    try {
+      const res = await request(app)
+        .post(`/fhir/R4/Binary/${binary.id}/$expunge`)
+        .set('Authorization', 'Bearer ' + superAdminAccessToken)
+        .set('Content-Type', ContentType.FHIR_JSON)
+        .send({});
+      expect(res.status).toBe(200);
+
+      // DB row is gone and the storage delete was triggered for this binary id
+      expect(await existsInDatabase('Binary', binary.id)).toBe(false);
+      expect(deleteBinarySpy).toHaveBeenCalledWith(expect.objectContaining({ id: binary.id }));
+    } finally {
+      deleteBinarySpy.mockRestore();
+    }
   });
 
   test.each([

@@ -1406,6 +1406,9 @@ export class Repository extends FhirRepository implements Disposable {
 
         await new DeleteQuery(resourceType + '_History').where('id', 'IN', deletedIds).execute(client);
         await txRepo.postCommit(() => txRepo.deleteCacheEntries(resourceType, deletedIds));
+        if (resourceType === 'Binary' && getConfig().expungeDeletesBinaryStorage !== false) {
+          await txRepo.postCommit(() => txRepo.deleteBinaryStorage(deletedIds));
+        }
         return deletedIds;
       },
       { serializable: true }
@@ -1416,6 +1419,27 @@ export class Repository extends FhirRepository implements Disposable {
       deletedIds.length
     );
     await this.resourceCap()?.deleted(deletedIds.length);
+  }
+
+  /**
+   * Best-effort deletion of binary storage objects for expunged Binary resources.
+   * Runs after the database delete commits; failures are logged, not thrown.
+   * @param ids - The expunged Binary resource IDs.
+   */
+  private async deleteBinaryStorage(ids: string[]): Promise<void> {
+    const storage = getBinaryStorage();
+    const results = await Promise.allSettled(
+      ids.map((id) => storage.deleteBinary({ resourceType: 'Binary', id } as Binary))
+    );
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result.status === 'rejected') {
+        getLogger().error('Failed to delete binary storage during expunge', {
+          id: ids[i],
+          err: result.reason,
+        });
+      }
+    }
   }
 
   /**

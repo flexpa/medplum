@@ -36,6 +36,19 @@ export interface MedplumServerConfig {
    */
   cacheRedis?: MedplumRedisConfig;
   /**
+   * TTL in seconds for entries written to the Redis resource cache.
+   * Only a positive value is honored; unset, non-numeric, `0`, or negative fall back to the default
+   * (Redis rejects `EX <= 0`, which would throw on every cache write). Default is `21600` (6 hours).
+   */
+  resourceCacheTtlSeconds?: number;
+  /**
+   * Optional list of FHIR resource types whose entries are never written to the Redis resource cache.
+   * Reads for these types miss the cache and fall through to the database. Useful for large,
+   * write-once, rarely-re-read resources (e.g. `Binary`, `DocumentReference`) that would otherwise
+   * dominate cache memory. Default is `['Binary', 'DocumentReference']`; set to `[]` to cache everything.
+   */
+  cacheSkipResourceTypes?: string[];
+  /**
    * Optional separate Redis config for rate limiting (HTTP rate limiter, FHIR quota, resource cap).
    * Falls back to `redis` if not specified.
    * Separating rate limiting from other purposes can improve performance under high load by isolating rate limiting operations.

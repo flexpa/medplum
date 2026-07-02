@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 import type { WithId } from '@medplum/core';
-import type { Patient, Reference } from '@medplum/fhirtypes';
+import type { Binary, Patient, Reference } from '@medplum/fhirtypes';
 import { randomUUID } from 'node:crypto';
 import { initAppServices, shutdownApp } from '../../app';
-import { loadTestConfig } from '../../config/loader';
+import { getConfig, loadTestConfig } from '../../config/loader';
+import { getCacheRedis } from '../../redis';
 import {
   deleteResourceCacheEntries,
   deleteResourceCacheEntry,
@@ -46,6 +47,70 @@ describe('Repository resource cache', () => {
     }
 
     await expect(getResourceCacheEntry<Patient>('Patient', patient.id)).resolves.toBeUndefined();
+  });
+
+  test('Applies configured TTL to cache entries', async () => {
+    const config = getConfig();
+    const original = config.resourceCacheTtlSeconds;
+    const patient = buildPatient();
+
+    try {
+      config.resourceCacheTtlSeconds = 123;
+      await setResourceCacheEntry(patient);
+
+      const ttl = await getCacheRedis().ttl(getResourceCacheKey('Patient', patient.id));
+      // TTL counts down from the configured value; allow a small window for elapsed time.
+      expect(ttl).toBeGreaterThan(0);
+      expect(ttl).toBeLessThanOrEqual(123);
+      expect(ttl).toBeGreaterThan(123 - 10);
+    } finally {
+      config.resourceCacheTtlSeconds = original;
+      await deleteResourceCacheEntry('Patient', patient.id);
+    }
+  });
+
+  test('Skips caching resource types in cacheSkipResourceTypes', async () => {
+    const config = getConfig();
+    const original = config.cacheSkipResourceTypes;
+    const binary: WithId<Binary> = {
+      resourceType: 'Binary',
+      id: randomUUID(),
+      contentType: 'text/plain',
+      meta: { project: randomUUID() },
+    };
+
+    try {
+      config.cacheSkipResourceTypes = ['Binary'];
+      await setResourceCacheEntry(binary);
+
+      // Skipped types are never written, so a read misses and falls through to the database.
+      await expect(getResourceCacheEntry<Binary>('Binary', binary.id)).resolves.toBeUndefined();
+    } finally {
+      config.cacheSkipResourceTypes = original;
+      await deleteResourceCacheEntry('Binary', binary.id);
+    }
+  });
+
+  test('Caches skipped types once removed from cacheSkipResourceTypes', async () => {
+    const config = getConfig();
+    const original = config.cacheSkipResourceTypes;
+    const binary: WithId<Binary> = {
+      resourceType: 'Binary',
+      id: randomUUID(),
+      contentType: 'text/plain',
+      meta: { project: randomUUID() },
+    };
+
+    try {
+      config.cacheSkipResourceTypes = [];
+      await setResourceCacheEntry(binary);
+
+      const cacheEntry = await getResourceCacheEntry<Binary>('Binary', binary.id);
+      expect(cacheEntry).toStrictEqual({ resource: binary, projectId: binary.meta?.project });
+    } finally {
+      config.cacheSkipResourceTypes = original;
+      await deleteResourceCacheEntry('Binary', binary.id);
+    }
   });
 
   test('Bulk reads preserve reference order', async () => {

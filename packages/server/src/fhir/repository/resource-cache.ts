@@ -3,9 +3,8 @@
 import type { WithId } from '@medplum/core';
 import { stringify } from '@medplum/core';
 import type { Reference, Resource } from '@medplum/fhirtypes';
+import { getConfig } from '../../config/loader';
 import { getCacheRedis } from '../../redis';
-
-const RESOURCE_CACHE_EX_SECONDS = 24 * 60 * 60; // 24 hours in seconds
 
 export interface CacheEntry<T extends Resource = Resource> {
   resource: T;
@@ -71,12 +70,18 @@ export async function getResourceCacheEntries(references: Reference[]): Promise<
  * @param resource - The resource to cache.
  */
 export async function setResourceCacheEntry(resource: WithId<Resource>): Promise<void> {
+  const config = getConfig();
+  // Skip caching configured resource types (e.g. large write-once Binary/DocumentReference blobs);
+  // reads for these types simply miss and fall through to the database.
+  if (config.cacheSkipResourceTypes.includes(resource.resourceType)) {
+    return;
+  }
   const projectId = resource.meta?.project;
   await getCacheRedis().set(
     getResourceCacheKey(resource.resourceType, resource.id),
     stringify({ resource, projectId }),
     'EX',
-    RESOURCE_CACHE_EX_SECONDS
+    config.resourceCacheTtlSeconds
   );
 }
 

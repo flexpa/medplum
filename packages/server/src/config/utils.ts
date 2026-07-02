@@ -52,6 +52,13 @@ export function addDefaults(config: MedplumServerConfig): ServerConfig {
   config.defaultMaxUserWebSocketSubscriptions ??= 20;
   config.asyncDelayScaling ??= 5;
   config.aiRealtimeTranscriptionUrl ??= 'wss://api.openai.com/v1/realtime?intent=transcription';
+  // Only a positive value is honored; unset, NaN, 0, and negative all fall back to 6 hours.
+  // Redis rejects `EX <= 0`, so a non-positive TTL would throw on every cache write.
+  config.resourceCacheTtlSeconds =
+    config.resourceCacheTtlSeconds && config.resourceCacheTtlSeconds > 0
+      ? config.resourceCacheTtlSeconds
+      : 6 * 60 * 60; // 6 hours in seconds
+  config.cacheSkipResourceTypes ??= ['Binary', 'DocumentReference'];
 
   // Automatically generate a signing key if using built-in storage and no signing key is provided
   if (config.storageBaseUrl.startsWith(config.baseUrl) && !config.signingKey) {
@@ -110,7 +117,9 @@ type DefaultConfigKeys =
   | 'defaultAuthRateLimit'
   | 'defaultFhirQuota'
   | 'aiRealtimeTranscriptionUrl'
-  | 'asyncDelayScaling';
+  | 'asyncDelayScaling'
+  | 'resourceCacheTtlSeconds'
+  | 'cacheSkipResourceTypes';
 
 const integerKeys = new Set([
   'accurateCountThreshold',
@@ -132,6 +141,7 @@ const integerKeys = new Set([
   'transactionExpBackoffBaseDelayMs',
   'idleInTransactionLogThresholdMs',
   'fhirSearchMinLimit',
+  'resourceCacheTtlSeconds',
 
   'database.maxConnections',
   'database.port',
@@ -214,7 +224,11 @@ export function isObjectConfig(key: string): boolean {
   return objectKeys.has(key);
 }
 
-const arrayKeys = new Set(['dataWarehouse.includeResourceTypes', 'dataWarehouse.excludeResourceTypes']);
+const arrayKeys = new Set([
+  'cacheSkipResourceTypes',
+  'dataWarehouse.includeResourceTypes',
+  'dataWarehouse.excludeResourceTypes',
+]);
 
 export function isArrayConfig(key: string): boolean {
   return arrayKeys.has(key);

@@ -171,6 +171,42 @@ describe('Config', () => {
     expect(config.bcryptHashSalt).toStrictEqual(12);
   });
 
+  test('Resource cache defaults', async () => {
+    setEnv('MEDPLUM_BASE_URL', 'http://localhost:3000');
+
+    const config = await loadConfig('env');
+    expect(config.resourceCacheTtlSeconds).toStrictEqual(6 * 60 * 60);
+    expect(config.cacheSkipResourceTypes).toStrictEqual(['Binary', 'DocumentReference']);
+  });
+
+  test('Resource cache env overrides', async () => {
+    setEnv('MEDPLUM_BASE_URL', 'http://localhost:3000');
+    setEnv('MEDPLUM_RESOURCE_CACHE_TTL_SECONDS', '21600');
+    setEnv('MEDPLUM_CACHE_SKIP_RESOURCE_TYPES', 'Binary, DocumentReference, Media');
+
+    const config = await loadConfig('env');
+    expect(config.resourceCacheTtlSeconds).toStrictEqual(21600);
+    expect(config.cacheSkipResourceTypes).toStrictEqual(['Binary', 'DocumentReference', 'Media']);
+  });
+
+  test('Non-positive resource cache TTL falls back to default', async () => {
+    setEnv('MEDPLUM_BASE_URL', 'http://localhost:3000');
+    setEnv('MEDPLUM_RESOURCE_CACHE_TTL_SECONDS', '0');
+
+    const config = await loadConfig('env');
+    expect(config.resourceCacheTtlSeconds).toStrictEqual(6 * 60 * 60);
+  });
+
+  test('Empty cacheSkipResourceTypes override caches all types', async () => {
+    setEnv('MEDPLUM_BASE_URL', 'http://localhost:3000');
+    setEnv('MEDPLUM_CACHE_SKIP_RESOURCE_TYPES', '');
+
+    const config = await loadConfig('env');
+    // An empty override yields no real resource type, so nothing is skipped.
+    expect(config.cacheSkipResourceTypes).not.toContain('Binary');
+    expect(config.cacheSkipResourceTypes).not.toContain('DocumentReference');
+  });
+
   test('Env config cacheRedis prefix', async () => {
     setEnv('MEDPLUM_BASE_URL', 'http://localhost:3000');
     setEnv('MEDPLUM_CACHE_REDIS_HOST', 'cache-redis.example.com');

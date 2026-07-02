@@ -488,6 +488,18 @@ Optional max offset for search queries.
 
 **Default:** `10000`
 
+### resourceCacheTtlSeconds
+
+Optional TTL, in seconds, for entries written to the Redis resource cache. Only a positive value is honored; unset, non-numeric, `0`, or negative values fall back to the default (Redis rejects `EX <= 0`, which would otherwise throw on every cache write).
+
+**Default:** `21600` (6 hours)
+
+### cacheSkipResourceTypes
+
+Optional list of FHIR resource types whose entries are never written to the Redis resource cache. Reads for these types miss the cache and fall through to the database. Useful for large, write-once, rarely-re-read resources (such as `Binary` and `DocumentReference`) that would otherwise dominate cache memory. Set to an empty list to cache all resource types.
+
+**Default:** `["Binary", "DocumentReference"]`
+
 ### defaultBotRuntimeVersion
 
 Optional default bot runtime version. See [Bot runtime version](/docs/api/fhir/medplum/bot) for more details.

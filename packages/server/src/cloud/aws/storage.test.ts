@@ -3,7 +3,9 @@
 import {
   CopyObjectCommand,
   CreateMultipartUploadCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -231,6 +233,45 @@ describe('Storage', () => {
         Key: 'binary/789/012',
       })
     ).toHaveLength(1);
+  });
+
+  test('deleteBinary lists and batch-deletes all versions', async () => {
+    initBinaryStorage('s3:foo');
+    const storage = getBinaryStorage();
+
+    mockS3Client.on(ListObjectsV2Command).resolves({
+      Contents: [{ Key: 'binary/123/v1' }, { Key: 'binary/123/v2' }],
+      IsTruncated: false,
+    });
+    mockS3Client.on(DeleteObjectsCommand).resolves({});
+
+    await storage.deleteBinary({ resourceType: 'Binary', id: '123' } as Binary);
+
+    expect(mockS3Client).toReceiveCommandWith(ListObjectsV2Command, {
+      Bucket: 'foo',
+      Prefix: 'binary/123/',
+    });
+    expect(mockS3Client).toReceiveCommandWith(DeleteObjectsCommand, {
+      Bucket: 'foo',
+      Delete: { Objects: [{ Key: 'binary/123/v1' }, { Key: 'binary/123/v2' }], Quiet: true },
+    });
+  });
+
+  test('deleteBinary paginates and skips delete when empty', async () => {
+    initBinaryStorage('s3:foo');
+    const storage = getBinaryStorage();
+
+    mockS3Client
+      .on(ListObjectsV2Command)
+      .resolvesOnce({ Contents: [{ Key: 'binary/123/v1' }], IsTruncated: true, NextContinuationToken: 'tok' })
+      .resolvesOnce({ Contents: [], IsTruncated: false });
+    mockS3Client.on(DeleteObjectsCommand).resolves({});
+
+    await storage.deleteBinary({ resourceType: 'Binary', id: '123' } as Binary);
+
+    // Two list pages, and only one delete (the empty page issues no delete)
+    expect(mockS3Client.commandCalls(ListObjectsV2Command)).toHaveLength(2);
+    expect(mockS3Client.commandCalls(DeleteObjectsCommand)).toHaveLength(1);
   });
 
   describe('SSE-C encryption', () => {

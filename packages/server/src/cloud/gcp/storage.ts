@@ -63,6 +63,10 @@ export class GoogleCloudStorage extends BaseBinaryStorage {
     await sourceFile.copy(destinationFile);
   }
 
+  async deleteByPrefix(prefix: string): Promise<void> {
+    await this.bucket.deleteFiles({ prefix });
+  }
+
   async getPresignedUrl(binary: Binary, opts?: PresignedUrlOptions): Promise<string> {
     const file = this.bucket.file(this.getKey(binary));
     const options: GetSignedUrlConfig = {

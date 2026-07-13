@@ -66,6 +66,12 @@ export class AzureBlobStorage extends BaseBinaryStorage {
     await destinationBlobClient.beginCopyFromURL(sourceBlobClient.url);
   }
 
+  async deleteByPrefix(prefix: string): Promise<void> {
+    for await (const blob of this.containerClient.listBlobsFlat({ prefix })) {
+      await this.containerClient.deleteBlob(blob.name);
+    }
+  }
+
   async getPresignedUrl(binary: Binary, opts?: PresignedUrlOptions): Promise<string> {
     const blobClient = this.containerClient.getBlobClient(this.getKey(binary));
 

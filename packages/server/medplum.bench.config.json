@@ -1,0 +1,15 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "dbname": "medplum_bench",
+    "username": "medplum",
+    "password": "medplum",
+    "runMigrations": false
+  },
+  "redis": {
+    "host": "localhost",
+    "port": 6380,
+    "password": ""
+  }
+}

@@ -9,6 +9,13 @@ node_modules/
 # Dotenv
 .env
 
+# Benchmark CPU profiles
+*.cpuprofile
+profiles/
+
+# Benchmark results (machine-specific; keep/commit selectively)
+.bench-results/
+
 .failed
 prettier-fmt.err
 prettier-fmt1.err
